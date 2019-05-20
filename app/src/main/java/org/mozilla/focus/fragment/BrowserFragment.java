@@ -80,7 +80,6 @@ import org.mozilla.focus.widget.AnimatedProgressBar;
 import org.mozilla.focus.widget.BackKeyHandleable;
 import org.mozilla.focus.widget.FindInPage;
 import org.mozilla.focus.widget.FragmentListener;
-import org.mozilla.focus.widget.TabRestoreMonitor;
 import org.mozilla.permissionhandler.PermissionHandle;
 import org.mozilla.permissionhandler.PermissionHandler;
 import org.mozilla.rocket.content.BottomBarItemAdapter;
@@ -1179,17 +1178,6 @@ public class BrowserFragment extends LocaleAwareFragment implements ScreenNaviga
         return ScreenNavigator.get(getContext()).isBrowserInForeground() && !TabTray.isShowing(getFragmentManager());
     }
 
-    private boolean isTabRestoredComplete() {
-        if (!(getActivity() instanceof TabRestoreMonitor)) {
-            if (AppConstants.isDevBuild()) {
-                throw new RuntimeException("Base activity needs to implement TabRestoreMonitor");
-            } else {
-                return true; // No clue for the tab restore status. Just return true to bypass smile face tab counter
-            }
-        }
-        return ((TabRestoreMonitor) getActivity()).isTabRestoredComplete();
-    }
-
     public void showFindInPage() {
         final Session focusTab = sessionManager.getFocusSession();
         if (focusTab != null) {
@@ -1568,9 +1556,7 @@ public class BrowserFragment extends LocaleAwareFragment implements ScreenNaviga
 
         @Override
         public void onSessionCountChanged(int count) {
-            if (isTabRestoredComplete()) {
-                chromeViewModel.onTabCountChanged(count);
-            }
+            chromeViewModel.onTabCountChanged(count);
         }
 
         private void transitToTab(@NonNull Session targetTab) {
