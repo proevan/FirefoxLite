@@ -178,6 +178,7 @@ public class HomeFragment extends LocaleAwareFragment implements TopSitesContrac
         this.presenter.setView(this);
         this.presenter.setModel(this);
         bannerHelper.setListener(this);
+        sessionManager = TabsSessionProvider.getOrThrow(getActivity());
         chromeViewModel = Inject.obtainChromeViewModel(getActivity());
     }
 
@@ -273,7 +274,6 @@ public class HomeFragment extends LocaleAwareFragment implements TopSitesContrac
 
         setupBottomBar(view);
 
-        sessionManager = TabsSessionProvider.getOrThrow(getActivity());
         sessionManager.register(this.observer);
 
         this.fakeInput = view.findViewById(R.id.home_fragment_fake_input);

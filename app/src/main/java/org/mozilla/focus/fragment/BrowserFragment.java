@@ -224,6 +224,7 @@ public class BrowserFragment extends LocaleAwareFragment implements ScreenNaviga
                 BookmarkRepository.getInstance(BookmarksDatabase.getInstance(requireContext())));
         bookmarkViewModel = ViewModelProviders.of(this, factory).get(BookmarkViewModel.class);
         bottomBarViewModel = Inject.obtainBottomBarViewModel(getActivity());
+        sessionManager = TabsSessionProvider.getOrThrow(getActivity());
         chromeViewModel = Inject.obtainChromeViewModel(getActivity());
     }
 
@@ -459,8 +460,6 @@ public class BrowserFragment extends LocaleAwareFragment implements ScreenNaviga
         initialiseNormalBrowserUi();
 
         webViewSlot = view.findViewById(R.id.webview_slot);
-
-        sessionManager = TabsSessionProvider.getOrThrow(getActivity());
 
         sessionManager.register(this.managerObserver, this, false);
 
@@ -1288,6 +1287,7 @@ public class BrowserFragment extends LocaleAwareFragment implements ScreenNaviga
 
         @Override
         public void onUrlChanged(@NonNull Session session, @Nullable String url) {
+            chromeViewModel.onFocusedSessionChanged(url);
             if (!isForegroundSession(session)) {
                 return;
             }
@@ -1536,6 +1536,7 @@ public class BrowserFragment extends LocaleAwareFragment implements ScreenNaviga
 
         @Override
         public void onFocusChanged(@Nullable final Session tab, SessionManager.Factor factor) {
+            chromeViewModel.onFocusedSessionChanged(tab != null ? tab.getUrl() : null);
             if (tab == null) {
                 if (factor == SessionManager.Factor.FACTOR_NO_FOCUS && !isStartedFromExternalApp()) {
                     ScreenNavigator.get(getContext()).popToHomeScreen(true);
