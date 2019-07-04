@@ -24,6 +24,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.Observer
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.android.synthetic.main.fragment_private_browser.browser_bottom_bar
+import mozilla.components.browser.session.Session
+import mozilla.components.browser.session.SessionManager
 import mozilla.components.concept.engine.EngineView
 import mozilla.components.concept.engine.LifecycleObserver
 import org.mozilla.focus.BuildConfig
@@ -48,8 +50,6 @@ import org.mozilla.rocket.content.app
 import org.mozilla.rocket.content.view.BottomBar
 import org.mozilla.rocket.extension.nonNullObserve
 import org.mozilla.rocket.extension.switchFrom
-import org.mozilla.rocket.tabs.Session
-import org.mozilla.rocket.tabs.SessionManager
 import org.mozilla.rocket.tabs.TabView.FullscreenCallback
 import org.mozilla.rocket.tabs.TabView.HitTarget
 import org.mozilla.rocket.tabs.TabViewClient
@@ -67,6 +67,9 @@ class BrowserFragment : LocaleAwareFragment(),
         ScreenNavigator.BrowserScreen,
         BackKeyHandleable {
 
+    private val sessionManager: SessionManager by lazy {
+        app().sessionManager
+    }
     private lateinit var permissionHandler: PermissionHandler
     private lateinit var bottomBarItemAdapter: BottomBarItemAdapter
     private lateinit var chromeViewModel: ChromeViewModel
@@ -83,7 +86,7 @@ class BrowserFragment : LocaleAwareFragment(),
 
     private lateinit var trackerPopup: TrackerPopup
 
-    private var lastSession: mozilla.components.browser.session.Session? = null
+    private var lastSession: Session? = null
 
     private var systemVisibility = ViewUtils.SYSTEM_UI_VISIBILITY_NONE
 
@@ -142,8 +145,8 @@ class BrowserFragment : LocaleAwareFragment(),
 
         toolbarRoot = view.findViewById(R.id.toolbar_root)
 
-        app().sessionManager.register(sessionManagerObserver)
-        app().sessionManager.selectedSession?.let {
+        sessionManager.register(sessionManagerObserver)
+        sessionManager.selectedSession?.let {
             it.register(sessionObserver)
             lastSession = it
         }
@@ -153,7 +156,7 @@ class BrowserFragment : LocaleAwareFragment(),
 
     override fun onDestroyView() {
         super.onDestroyView()
-        app().sessionManager.unregister(sessionManagerObserver)
+        sessionManager.unregister(sessionManagerObserver)
         lastSession?.unregister(sessionObserver)
     }
 
@@ -246,11 +249,11 @@ class BrowserFragment : LocaleAwareFragment(),
     }
 
     override fun onBackPressed(): Boolean {
-        if (app().sessionManager.selectedSession?.canGoBack == true) {
+        if (sessionManager.selectedSession?.canGoBack == true) {
             goBack()
             return true
         }
-        app().sessionManager.remove()
+        sessionManager.remove()
         ScreenNavigator.get(activity).popToHomeScreen(true)
         chromeViewModel.dropCurrentPage.call()
         return true
@@ -280,13 +283,13 @@ class BrowserFragment : LocaleAwareFragment(),
     ) {
         if (url.isNotBlank()) {
             displayUrlView.text = url
-            val selectedSession = app().sessionManager.selectedSession
+            val selectedSession = sessionManager.selectedSession
             if (selectedSession == null) {
-                val newSession = mozilla.components.browser.session.Session(url)
-                app().sessionManager.add(newSession)
-                engineView.render(app().sessionManager.getOrCreateEngineSession(newSession))
+                val newSession = Session(url)
+                sessionManager.add(newSession)
+                engineView.render(sessionManager.getOrCreateEngineSession(newSession))
             } else {
-                app().sessionManager.getOrCreateEngineSession(selectedSession).loadUrl(url)
+                sessionManager.getOrCreateEngineSession(selectedSession).loadUrl(url)
             }
 
             ThreadUtils.postToMainThread(onViewReadyCallback)
@@ -301,20 +304,20 @@ class BrowserFragment : LocaleAwareFragment(),
         permissionHandler.onRequestPermissionsResult(context, requestCode, permissions, grantResults)
     }
 
-    private fun goBack() = app().sessionManager.selectedSession?.let {
-        app().sessionManager.getEngineSession()?.goBack()
+    private fun goBack() = sessionManager.selectedSession?.let {
+        sessionManager.getEngineSession()?.goBack()
     }
 
-    private fun goForward() = app().sessionManager.selectedSession?.let {
-        app().sessionManager.getEngineSession()?.goForward()
+    private fun goForward() = sessionManager.selectedSession?.let {
+        sessionManager.getEngineSession()?.goForward()
     }
 
-    private fun stop() = app().sessionManager.selectedSession?.let {
-        app().sessionManager.getEngineSession()?.stopLoading()
+    private fun stop() = sessionManager.selectedSession?.let {
+        sessionManager.getEngineSession()?.stopLoading()
     }
 
-    private fun reload() = app().sessionManager.selectedSession?.let {
-        app().sessionManager.getEngineSession()?.reload()
+    private fun reload() = sessionManager.selectedSession?.let {
+        sessionManager.getEngineSession()?.reload()
     }
 
     private fun onTrackerButtonClicked() {
@@ -322,7 +325,7 @@ class BrowserFragment : LocaleAwareFragment(),
     }
 
     private fun onDeleteClicked() {
-        app().sessionManager.removeSessions()
+        sessionManager.removeSessions()
         chromeViewModel.dropCurrentPage.call()
         ScreenNavigator.get(activity).popToHomeScreen(true)
     }
@@ -414,18 +417,18 @@ class BrowserFragment : LocaleAwareFragment(),
         })
     }
 
-    val sessionManagerObserver = object : mozilla.components.browser.session.SessionManager.Observer {
+    val sessionManagerObserver = object : SessionManager.Observer {
         override fun onAllSessionsRemoved() {
         }
 
-        override fun onSessionAdded(session: mozilla.components.browser.session.Session) {
+        override fun onSessionAdded(session: Session) {
         }
 
-        override fun onSessionRemoved(session: mozilla.components.browser.session.Session) {
+        override fun onSessionRemoved(session: Session) {
             session.unregister(sessionObserver)
         }
 
-        override fun onSessionSelected(session: mozilla.components.browser.session.Session) {
+        override fun onSessionSelected(session: Session) {
             lastSession?.unregister(sessionObserver)
             session.register(sessionObserver)
             lastSession = session
@@ -435,11 +438,11 @@ class BrowserFragment : LocaleAwareFragment(),
         }
     }
 
-    val sessionObserver = object : mozilla.components.browser.session.Session.Observer {
+    val sessionObserver = object : Session.Observer {
         // TODO: Evan
     }
 
-    class Observer(val fragment: BrowserFragment) : SessionManager.Observer, Session.Observer {
+    class Observer(val fragment: BrowserFragment) : org.mozilla.rocket.tabs.SessionManager.Observer, org.mozilla.rocket.tabs.Session.Observer {
         override fun updateFailingUrl(url: String?, updateFromError: Boolean) {
             // do nothing, exist for interface compatibility only.
         }
@@ -459,16 +462,16 @@ class BrowserFragment : LocaleAwareFragment(),
         }
 
         var callback: FullscreenCallback? = null
-        var session: Session? = null
+        var session: org.mozilla.rocket.tabs.Session? = null
 
-        override fun onSessionAdded(session: Session, arguments: Bundle?) {
+        override fun onSessionAdded(session: org.mozilla.rocket.tabs.Session, arguments: Bundle?) {
         }
 
-        override fun onProgress(session: Session, progress: Int) {
+        override fun onProgress(session: org.mozilla.rocket.tabs.Session, progress: Int) {
             fragment.progressView.progress = progress
         }
 
-        override fun onTitleChanged(session: Session, title: String?) {
+        override fun onTitleChanged(session: org.mozilla.rocket.tabs.Session, title: String?) {
             fragment.chromeViewModel.onFocusedTitleChanged(title)
             session.let {
                 if (fragment.displayUrlView.text.toString() != it.url) {
@@ -477,7 +480,7 @@ class BrowserFragment : LocaleAwareFragment(),
             }
         }
 
-        override fun onLongPress(session: Session, hitTarget: HitTarget) {
+        override fun onLongPress(session: org.mozilla.rocket.tabs.Session, hitTarget: HitTarget) {
             fragment.activity?.let {
                 WebContextMenu.show(true,
                         it,
@@ -521,14 +524,14 @@ class BrowserFragment : LocaleAwareFragment(),
             session?.engineSession?.tabView?.let { if (it is WebView) it.clearFocus() }
         }
 
-        override fun onUrlChanged(session: Session, url: String?) {
+        override fun onUrlChanged(session: org.mozilla.rocket.tabs.Session, url: String?) {
             fragment.chromeViewModel.onFocusedUrlChanged(url)
             if (!UrlUtils.isInternalErrorURL(url)) {
                 fragment.displayUrlView.text = url
             }
         }
 
-        override fun onLoadingStateChanged(session: Session, loading: Boolean) {
+        override fun onLoadingStateChanged(session: org.mozilla.rocket.tabs.Session, loading: Boolean) {
             if (loading) {
                 fragment.chromeViewModel.onPageLoadingStarted()
             } else {
@@ -536,7 +539,7 @@ class BrowserFragment : LocaleAwareFragment(),
             }
         }
 
-        override fun onSecurityChanged(session: Session, isSecure: Boolean) {
+        override fun onSecurityChanged(session: org.mozilla.rocket.tabs.Session, isSecure: Boolean) {
             val level = if (isSecure) SITE_LOCK else SITE_GLOBE
             fragment.siteIdentity.setImageLevel(level)
         }
@@ -553,7 +556,7 @@ class BrowserFragment : LocaleAwareFragment(),
         }
 
         override fun onDownload(
-            session: Session,
+            session: org.mozilla.rocket.tabs.Session,
             download: mozilla.components.browser.session.Download
         ): Boolean {
             val activity = fragment.activity
@@ -593,11 +596,11 @@ class BrowserFragment : LocaleAwareFragment(),
             builder.show()
         }
 
-        override fun onNavigationStateChanged(session: Session, canGoBack: Boolean, canGoForward: Boolean) {
+        override fun onNavigationStateChanged(session: org.mozilla.rocket.tabs.Session, canGoBack: Boolean, canGoForward: Boolean) {
             fragment.chromeViewModel.onNavigationStateChanged(canGoBack, canGoForward)
         }
 
-        override fun onFocusChanged(session: Session?, factor: SessionManager.Factor) {
+        override fun onFocusChanged(session: org.mozilla.rocket.tabs.Session?, factor: org.mozilla.rocket.tabs.SessionManager.Factor) {
             fragment.chromeViewModel.onFocusedUrlChanged(session?.url)
             fragment.chromeViewModel.onFocusedTitleChanged(session?.title)
             if (session != null) {
