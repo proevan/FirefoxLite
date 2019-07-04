@@ -7,7 +7,6 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.os.Parcelable
-import android.text.TextUtils
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -55,8 +54,6 @@ import org.mozilla.rocket.tabs.TabView.FullscreenCallback
 import org.mozilla.rocket.tabs.TabView.HitTarget
 import org.mozilla.rocket.tabs.TabViewClient
 import org.mozilla.rocket.tabs.TabViewEngineSession
-import org.mozilla.rocket.tabs.TabsSessionProvider
-import org.mozilla.rocket.tabs.utils.TabUtil
 import org.mozilla.rocket.tabs.web.Download
 import org.mozilla.rocket.tabs.web.DownloadCallback
 import org.mozilla.threadutils.ThreadUtils
@@ -71,8 +68,6 @@ class BrowserFragment : LocaleAwareFragment(),
         BackKeyHandleable {
 
     private lateinit var permissionHandler: PermissionHandler
-    private lateinit var sessionManager: SessionManager
-    private lateinit var observer: Observer
     private lateinit var bottomBarItemAdapter: BottomBarItemAdapter
     private lateinit var chromeViewModel: ChromeViewModel
 
@@ -147,11 +142,6 @@ class BrowserFragment : LocaleAwareFragment(),
 
         toolbarRoot = view.findViewById(R.id.toolbar_root)
 
-        sessionManager = TabsSessionProvider.getOrThrow(activity)
-        observer = Observer(this)
-        sessionManager.register(observer)
-        sessionManager.focusSession?.register(observer)
-
         app().sessionManager.register(sessionManagerObserver)
         app().sessionManager.selectedSession?.let {
             it.register(sessionObserver)
@@ -163,22 +153,8 @@ class BrowserFragment : LocaleAwareFragment(),
 
     override fun onDestroyView() {
         super.onDestroyView()
-
-        sessionManager.focusSession?.unregister(observer)
-        sessionManager.unregister(observer)
-
         app().sessionManager.unregister(sessionManagerObserver)
         lastSession?.unregister(sessionObserver)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        sessionManager.resume()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        sessionManager.pause()
     }
 
     override fun onAttach(context: Context) {
@@ -270,21 +246,11 @@ class BrowserFragment : LocaleAwareFragment(),
     }
 
     override fun onBackPressed(): Boolean {
-        val focus = sessionManager.focusSession ?: return false
-        val tabView = focus.engineSession?.tabView ?: return false
-
-        if (tabView.canGoBack()) {
-            goBack()
-            return true
-        }
-
         if (app().sessionManager.selectedSession?.canGoBack == true) {
             goBack()
             return true
         }
         app().sessionManager.remove()
-
-        sessionManager.dropTab(focus.id)
         ScreenNavigator.get(activity).popToHomeScreen(true)
         chromeViewModel.dropCurrentPage.call()
         return true
@@ -295,23 +261,15 @@ class BrowserFragment : LocaleAwareFragment(),
     }
 
     override fun switchToTab(tabId: String?) {
-        if (!TextUtils.isEmpty(tabId)) {
-            sessionManager.switchToTab(tabId!!)
-        }
+        // Do nothing in private mode
     }
 
     override fun goForeground() {
-        val tabView = sessionManager.focusSession?.engineSession?.tabView ?: return
-        if (tabViewSlot.childCount == 0) {
-            tabViewSlot.addView(tabView.view)
-        }
+        // Do nothing
     }
 
     override fun goBackground() {
-        val focus = sessionManager.focusSession ?: return
-        val tabView = focus.engineSession?.tabView ?: return
-        focus.engineSession?.detach()
-        tabViewSlot.removeView(tabView.view)
+        // Do nothing
     }
 
     override fun loadUrl(
@@ -322,12 +280,6 @@ class BrowserFragment : LocaleAwareFragment(),
     ) {
         if (url.isNotBlank()) {
             displayUrlView.text = url
-            if (sessionManager.tabsCount == 0) {
-                sessionManager.addTab(url, TabUtil.argument(null, false, true))
-            } else {
-                sessionManager.focusSession!!.engineSession?.tabView?.loadUrl(url)
-            }
-
             val selectedSession = app().sessionManager.selectedSession
             if (selectedSession == null) {
                 val newSession = mozilla.components.browser.session.Session(url)
@@ -371,9 +323,6 @@ class BrowserFragment : LocaleAwareFragment(),
 
     private fun onDeleteClicked() {
         app().sessionManager.removeSessions()
-        for (tab in sessionManager.getTabs()) {
-            sessionManager.dropTab(tab.id)
-        }
         chromeViewModel.dropCurrentPage.call()
         ScreenNavigator.get(activity).popToHomeScreen(true)
     }
@@ -424,7 +373,8 @@ class BrowserFragment : LocaleAwareFragment(),
         trackerPopup.onSwitchToggled = { enabled ->
             val appContext = (parentView.context.applicationContext as FocusApplication)
             appContext.settings.privateBrowsingSettings.setTurboMode(enabled)
-            sessionManager.focusSession?.engineSession?.tabView?.setContentBlockingEnabled(enabled)
+            // TODO: Evan, uncomment this
+//            sessionManager.focusSession?.engineSession?.tabView?.setContentBlockingEnabled(enabled)
 
             bottomBarItemAdapter.setTrackerSwitch(enabled)
             stop()
@@ -596,7 +546,8 @@ class BrowserFragment : LocaleAwareFragment(),
             if (count == 0) {
                 session?.unregister(this)
             } else {
-                session = fragment.sessionManager.focusSession
+                // TODO: Evan, uncomment this
+//                session = fragment.sessionManager.focusSession
                 session?.register(this)
             }
         }
@@ -650,9 +601,10 @@ class BrowserFragment : LocaleAwareFragment(),
             fragment.chromeViewModel.onFocusedUrlChanged(session?.url)
             fragment.chromeViewModel.onFocusedTitleChanged(session?.title)
             if (session != null) {
-                val canGoBack = fragment.sessionManager.focusSession?.canGoBack ?: false
-                val canGoForward = fragment.sessionManager.focusSession?.canGoForward ?: false
-                fragment.chromeViewModel.onNavigationStateChanged(canGoBack, canGoForward)
+                // TODO: Evan, uncomment this
+//                val canGoBack = fragment.sessionManager.focusSession?.canGoBack ?: false
+//                val canGoForward = fragment.sessionManager.focusSession?.canGoForward ?: false
+//                fragment.chromeViewModel.onNavigationStateChanged(canGoBack, canGoForward)
             }
         }
     }
