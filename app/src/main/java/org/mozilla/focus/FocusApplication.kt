@@ -14,6 +14,9 @@ import com.squareup.leakcanary.RefWatcher
 import dagger.android.AndroidInjector
 import dagger.android.DispatchingAndroidInjector
 import dagger.android.support.HasSupportFragmentInjector
+import mozilla.components.browser.engine.system.SystemEngine
+import mozilla.components.browser.session.SessionManager
+import mozilla.components.concept.engine.Engine
 import org.mozilla.focus.download.DownloadInfoManager
 import org.mozilla.focus.history.BrowsingHistoryManager
 import org.mozilla.focus.locale.LocaleAwareApplication
@@ -45,6 +48,12 @@ open class FocusApplication : LocaleAwareApplication(), HasSupportFragmentInject
 
     val settings by lazy {
         SettingsProvider(this)
+    }
+    val engine: Engine by lazy {
+        SystemEngine(this)
+    }
+    val sessionManager: SessionManager by lazy {
+        SessionManager(engine)
     }
 
     // Override getCacheDir cause when we create a WebView, it'll asked the application's
