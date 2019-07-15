@@ -5,18 +5,19 @@
 
 package org.mozilla.rocket.privately
 
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.Observer
-import androidx.lifecycle.ViewModelProviders
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import android.os.Bundle
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import android.view.View
 import android.widget.Toast
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.Observer
+import androidx.lifecycle.ViewModelProviders
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import mozilla.components.browser.session.SessionManager
 import org.mozilla.focus.BuildConfig
 import org.mozilla.focus.Inject
 import org.mozilla.focus.R
@@ -39,21 +40,19 @@ import org.mozilla.rocket.chrome.ChromeViewModel
 import org.mozilla.rocket.chrome.ChromeViewModel.OpenUrlAction
 import org.mozilla.rocket.component.LaunchIntentDispatcher
 import org.mozilla.rocket.component.PrivateSessionNotificationService
+import org.mozilla.rocket.content.app
 import org.mozilla.rocket.landing.NavigationModel
 import org.mozilla.rocket.landing.OrientationState
 import org.mozilla.rocket.landing.PortraitStateModel
 import org.mozilla.rocket.privately.browse.BrowserFragment
 import org.mozilla.rocket.privately.home.PrivateHomeFragment
-import org.mozilla.rocket.tabs.SessionManager
-import org.mozilla.rocket.tabs.TabsSessionProvider
 
 class PrivateModeActivity : BaseActivity(),
         ScreenNavigator.Provider,
-        ScreenNavigator.HostActivity,
-        TabsSessionProvider.SessionHost {
+        ScreenNavigator.HostActivity {
 
     private val LOG_TAG = "PrivateModeActivity"
-    private var sessionManager: SessionManager? = null
+    private lateinit var sessionManager: SessionManager
     private lateinit var chromeViewModel: ChromeViewModel
     private lateinit var tabViewProvider: PrivateTabViewProvider
     private lateinit var screenNavigator: ScreenNavigator
@@ -66,6 +65,7 @@ class PrivateModeActivity : BaseActivity(),
         // we don't keep any state if user leave Private-mode
         super.onCreate(null)
 
+        sessionManager = app().sessionManager
         chromeViewModel = Inject.obtainChromeViewModel(this)
         tabViewProvider = PrivateTabViewProvider(this)
         screenNavigator = ScreenNavigator(this)
@@ -107,7 +107,6 @@ class PrivateModeActivity : BaseActivity(),
     override fun onDestroy() {
         super.onDestroy()
         stopPrivateMode()
-        sessionManager?.destroy()
     }
 
     override fun applyLocale() {}
@@ -146,14 +145,14 @@ class PrivateModeActivity : BaseActivity(),
     }
 
     private fun onAddToHomeClicked() {
-        val focusTab = getSessionManager().focusSession ?: return
-        val url = focusTab.url
+        val selectedSession = sessionManager.selectedSession ?: return
+        val url = selectedSession.url
         // If we pin an invalid url as shortcut, the app will not function properly.
         // TODO: only enable the bottom menu item if the page is valid and loaded.
         if (!SupportUtils.isUrl(url)) {
             return
         }
-        val bitmap = focusTab.favicon
+        val bitmap = selectedSession.icon
         val shortcut = Intent(Intent.ACTION_VIEW)
         // Use activity-alias name here so we can start whoever want to control launching behavior
         // Besides, RocketLauncherActivity not exported so using the alias-name is required.
@@ -161,7 +160,7 @@ class PrivateModeActivity : BaseActivity(),
         shortcut.data = Uri.parse(url)
         shortcut.putExtra(LaunchIntentDispatcher.LaunchMethod.EXTRA_BOOL_HOME_SCREEN_SHORTCUT.value, true)
 
-        ShortcutUtils.requestPinShortcut(this, shortcut, focusTab.title, url!!, bitmap)
+        ShortcutUtils.requestPinShortcut(this, shortcut, selectedSession.title, url, bitmap)
     }
 
     private fun onShareClicked(url: String) {
@@ -190,15 +189,6 @@ class PrivateModeActivity : BaseActivity(),
         }
 
         super.onBackPressed()
-    }
-
-    override fun getSessionManager(): SessionManager {
-        if (sessionManager == null) {
-            sessionManager = SessionManager(tabViewProvider)
-        }
-
-        // we just created it, it definitely not null
-        return sessionManager!!
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -275,6 +265,7 @@ class PrivateModeActivity : BaseActivity(),
     }
 
     private fun stopPrivateMode() {
+        sessionManager.removeAll()
         PrivateSessionNotificationService.stop(this)
         PrivateMode.getInstance(this).sanitize()
         tabViewProvider.purify(this)
