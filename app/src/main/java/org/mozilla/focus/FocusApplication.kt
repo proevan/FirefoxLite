@@ -16,7 +16,9 @@ import dagger.android.DispatchingAndroidInjector
 import dagger.android.support.HasSupportFragmentInjector
 import mozilla.components.browser.engine.system.SystemEngine
 import mozilla.components.browser.session.SessionManager
+import mozilla.components.concept.engine.DefaultSettings
 import mozilla.components.concept.engine.Engine
+import mozilla.components.concept.engine.EngineSession
 import org.mozilla.focus.download.DownloadInfoManager
 import org.mozilla.focus.history.BrowsingHistoryManager
 import org.mozilla.focus.locale.LocaleAwareApplication
@@ -25,6 +27,7 @@ import org.mozilla.focus.screenshot.ScreenshotManager
 import org.mozilla.focus.search.SearchEngineManager
 import org.mozilla.focus.telemetry.TelemetryWrapper
 import org.mozilla.focus.utils.AdjustHelper
+import org.mozilla.focus.utils.Settings
 import org.mozilla.rocket.content.news.data.NewsSourceManager
 import org.mozilla.rocket.di.DaggerAppComponent
 import org.mozilla.rocket.partner.PartnerActivator
@@ -50,10 +53,31 @@ open class FocusApplication : LocaleAwareApplication(), HasSupportFragmentInject
         SettingsProvider(this)
     }
     val engine: Engine by lazy {
-        SystemEngine(this)
+        SystemEngine(this, engineSettings)
+    }
+    val engineSettings: DefaultSettings by lazy {
+        DefaultSettings().apply {
+            trackingProtectionPolicy = createTrackingProtectionPolicy(isInPrivateProcess)
+        }
     }
     val sessionManager: SessionManager by lazy {
         SessionManager(engine)
+    }
+
+    private fun createTrackingProtectionPolicy(isPrivateMode: Boolean): EngineSession.TrackingProtectionPolicy? {
+        return if (isPrivateMode) {
+            if (settings.privateBrowsingSettings.shouldUseTurboMode()) {
+                EngineSession.TrackingProtectionPolicy.all()
+            } else {
+                null
+            }
+        } else {
+            if (Settings.getInstance(this).shouldUseTurboMode()) {
+                EngineSession.TrackingProtectionPolicy.all()
+            } else {
+                null
+            }
+        }
     }
 
     // Override getCacheDir cause when we create a WebView, it'll asked the application's

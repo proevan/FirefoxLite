@@ -4,15 +4,13 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.net.Uri
 import android.os.Bundle
 import android.os.Parcelable
 import android.util.Log
+import android.view.ContextMenu
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -24,9 +22,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.Observer
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.android.synthetic.main.fragment_private_browser.browser_bottom_bar
+import mozilla.components.browser.engine.system.SystemEngineView
 import mozilla.components.browser.session.Session
 import mozilla.components.browser.session.SessionManager
+import mozilla.components.concept.engine.EngineSession
 import mozilla.components.concept.engine.EngineView
+import mozilla.components.concept.engine.HitResult
 import mozilla.components.concept.engine.LifecycleObserver
 import org.mozilla.focus.BuildConfig
 import org.mozilla.focus.FocusApplication
@@ -34,12 +35,10 @@ import org.mozilla.focus.Inject
 import org.mozilla.focus.R
 import org.mozilla.focus.download.EnqueueDownloadTask
 import org.mozilla.focus.locale.LocaleAwareFragment
-import org.mozilla.focus.menu.WebContextMenu
 import org.mozilla.focus.navigation.ScreenNavigator
 import org.mozilla.focus.telemetry.TelemetryWrapper
 import org.mozilla.focus.utils.ViewUtils
 import org.mozilla.focus.web.BrowsingSession
-import org.mozilla.focus.web.HttpAuthenticationDialogBuilder
 import org.mozilla.focus.widget.AnimatedProgressBar
 import org.mozilla.focus.widget.BackKeyHandleable
 import org.mozilla.permissionhandler.PermissionHandle
@@ -50,10 +49,8 @@ import org.mozilla.rocket.content.app
 import org.mozilla.rocket.content.view.BottomBar
 import org.mozilla.rocket.extension.nonNullObserve
 import org.mozilla.rocket.extension.switchFrom
-import org.mozilla.rocket.tabs.TabView.FullscreenCallback
-import org.mozilla.rocket.tabs.TabView.HitTarget
-import org.mozilla.rocket.tabs.TabViewClient
-import org.mozilla.rocket.tabs.TabViewEngineSession
+import org.mozilla.rocket.extension.updateTrackingProtectionPolicy
+import org.mozilla.rocket.menu.PrivateWebContextMenu
 import org.mozilla.rocket.tabs.web.Download
 import org.mozilla.rocket.tabs.web.DownloadCallback
 import org.mozilla.threadutils.ThreadUtils
@@ -158,6 +155,7 @@ class BrowserFragment : LocaleAwareFragment(),
         super.onDestroyView()
         sessionManager.unregister(sessionManagerObserver)
         lastSession?.unregister(sessionObserver)
+        unregisterForContextMenu(engineView.asView())
     }
 
     override fun onAttach(context: Context) {
@@ -333,7 +331,15 @@ class BrowserFragment : LocaleAwareFragment(),
     private fun attachEngineView(parentView: ViewGroup) {
         engineView = app().engine.createView(requireContext())
         lifecycle.addObserver(LifecycleObserver(engineView))
+        registerForContextMenu(engineView.asView())
         parentView.addView(engineView.asView())
+    }
+
+    override fun onCreateContextMenu(menu: ContextMenu?, v: View?, menuInfo: ContextMenu.ContextMenuInfo?) {
+        if (v is SystemEngineView && v.onLongClick(v)) {
+            return
+        }
+        super.onCreateContextMenu(menu, v, menuInfo)
     }
 
     private fun setupBottomBar(rootView: View) {
@@ -372,16 +378,26 @@ class BrowserFragment : LocaleAwareFragment(),
 
     private fun initTrackerView(parentView: View) {
         trackerPopup = TrackerPopup(parentView.context)
-
+        trackerPopup.setSwitchToggled(isTurboModeEnabled(requireContext()))
         trackerPopup.onSwitchToggled = { enabled ->
-            val appContext = (parentView.context.applicationContext as FocusApplication)
-            appContext.settings.privateBrowsingSettings.setTurboMode(enabled)
-            // TODO: Evan, uncomment this
-//            sessionManager.focusSession?.engineSession?.tabView?.setContentBlockingEnabled(enabled)
-
+            app().settings.privateBrowsingSettings.setTurboMode(enabled)
+            setTrackingProtectionEnabled(enabled)
+            // TODO: move to Session.Observer.onTrackerBlockingEnabledChanged
+            // for now the callback has a bug in version 0.52.0
             bottomBarItemAdapter.setTrackerSwitch(enabled)
             stop()
             reload()
+        }
+    }
+
+    private fun setTrackingProtectionEnabled(enabled: Boolean) {
+        if (enabled) {
+            EngineSession.TrackingProtectionPolicy.all()
+        } else {
+            null
+        }.let { policy ->
+            app().engineSettings.trackingProtectionPolicy = policy
+            sessionManager.updateTrackingProtectionPolicy(policy)
         }
     }
 
@@ -417,80 +433,57 @@ class BrowserFragment : LocaleAwareFragment(),
         })
     }
 
-    val sessionManagerObserver = object : SessionManager.Observer {
-        override fun onAllSessionsRemoved() {
-        }
-
+    private val sessionManagerObserver = object : SessionManager.Observer {
         override fun onSessionAdded(session: Session) {
+            chromeViewModel.onTabCountChanged(sessionManager.size)
         }
 
         override fun onSessionRemoved(session: Session) {
             session.unregister(sessionObserver)
+            chromeViewModel.onTabCountChanged(sessionManager.size)
         }
 
         override fun onSessionSelected(session: Session) {
             lastSession?.unregister(sessionObserver)
             session.register(sessionObserver)
             lastSession = session
-        }
 
-        override fun onSessionsRestored() {
+            chromeViewModel.run {
+                onFocusedUrlChanged(session.url)
+                onFocusedTitleChanged(session.title)
+                onNavigationStateChanged(session.canGoBack, session.canGoForward)
+            }
         }
     }
 
-    val sessionObserver = object : Session.Observer {
-        // TODO: Evan
-    }
-
-    class Observer(val fragment: BrowserFragment) : org.mozilla.rocket.tabs.SessionManager.Observer, org.mozilla.rocket.tabs.Session.Observer {
-        override fun updateFailingUrl(url: String?, updateFromError: Boolean) {
-            // do nothing, exist for interface compatibility only.
-        }
-
-        override fun handleExternalUrl(url: String?): Boolean {
-            // do nothing, exist for interface compatibility only.
-            return false
-        }
-
-        override fun onShowFileChooser(
-            es: TabViewEngineSession,
-            filePathCallback: ValueCallback<Array<Uri>>?,
-            fileChooserParams: WebChromeClient.FileChooserParams?
-        ): Boolean {
-            // do nothing, exist for interface compatibility only.
-            return false
-        }
-
-        var callback: FullscreenCallback? = null
-        var session: org.mozilla.rocket.tabs.Session? = null
-
-        override fun onSessionAdded(session: org.mozilla.rocket.tabs.Session, arguments: Bundle?) {
-        }
-
-        override fun onProgress(session: org.mozilla.rocket.tabs.Session, progress: Int) {
-            fragment.progressView.progress = progress
-        }
-
-        override fun onTitleChanged(session: org.mozilla.rocket.tabs.Session, title: String?) {
-            fragment.chromeViewModel.onFocusedTitleChanged(title)
-            session.let {
-                if (fragment.displayUrlView.text.toString() != it.url) {
-                    fragment.displayUrlView.text = it.url
+    private val sessionObserver = object : Session.Observer {
+        override fun onDownload(session: Session, download: mozilla.components.browser.session.Download): Boolean {
+            activity.let {
+                if (it == null || !it.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                    return false
                 }
             }
+
+            val d = Download(
+                    download.url,
+                    download.fileName,
+                    download.userAgent,
+                    "",
+                    download.contentType,
+                    download.contentLength ?: 0,
+                    false
+            )
+            permissionHandler.tryAction(
+                    fragment,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                    ACTION_DOWNLOAD,
+                    d
+            )
+            return true
         }
 
-        override fun onLongPress(session: org.mozilla.rocket.tabs.Session, hitTarget: HitTarget) {
-            fragment.activity?.let {
-                WebContextMenu.show(true,
-                        it,
-                        PrivateDownloadCallback(fragment, session.url),
-                        hitTarget)
-            }
-        }
-
-        override fun onEnterFullScreen(callback: FullscreenCallback, view: View?) {
-            with(fragment) {
+        override fun onFullScreenChanged(session: Session, enabled: Boolean) {
+            if (enabled) {
                 browserContainer.visibility = View.INVISIBLE
                 videoContainer.visibility = View.VISIBLE
                 videoContainer.addView(view)
@@ -500,119 +493,61 @@ class BrowserFragment : LocaleAwareFragment(),
             }
         }
 
-        override fun onExitFullScreen() {
-            with(fragment) {
-                browserContainer.visibility = View.VISIBLE
-                videoContainer.visibility = View.INVISIBLE
-                videoContainer.removeAllViews()
+        override fun onLoadingStateChanged(session: Session, loading: Boolean) {
+            if (loading) {
+                chromeViewModel.onPageLoadingStarted()
+            } else {
+                chromeViewModel.onPageLoadingStopped()
+            }
+        }
 
-                if (systemVisibility != ViewUtils.SYSTEM_UI_VISIBILITY_NONE) {
-                    ViewUtils.exitImmersiveMode(systemVisibility, activity)
+        override fun onLongPress(session: Session, hitResult: HitResult): Boolean {
+            activity?.let {
+                PrivateWebContextMenu.show(true,
+                    it,
+                    PrivateDownloadCallback(this@BrowserFragment),
+                    hitResult.toHitTarget()
+                )
+                return true
+            }
+            return false
+        }
+
+        override fun onNavigationStateChanged(session: Session, canGoBack: Boolean, canGoForward: Boolean) {
+            chromeViewModel.onNavigationStateChanged(canGoBack, canGoForward)
+        }
+
+        override fun onProgress(session: Session, progress: Int) {
+            progressView.progress = progress
+        }
+
+        override fun onSecurityChanged(session: Session, securityInfo: Session.SecurityInfo) {
+            val level = if (securityInfo.secure) SITE_LOCK else SITE_GLOBE
+            siteIdentity.setImageLevel(level)
+        }
+
+        override fun onTitleChanged(session: Session, title: String) {
+            chromeViewModel.onFocusedTitleChanged(title)
+            session.let {
+                if (displayUrlView.text.toString() != it.url) {
+                    displayUrlView.text = it.url
                 }
             }
-
-            callback?.fullScreenExited()
-            callback = null
-
-            // WebView gets focus, but unable to open the keyboard after exit Fullscreen for Android 7.0+
-            // We guess some component in WebView might lock focus
-            // So when user touches the input text box on Webview, it will not trigger to open the keyboard
-            // It may be a WebView bug.
-            // The workaround is clearing WebView focus
-            // The WebView will be normal when it gets focus again.
-            // If android change behavior after, can remove this.
-            session?.engineSession?.tabView?.let { if (it is WebView) it.clearFocus() }
         }
 
-        override fun onUrlChanged(session: org.mozilla.rocket.tabs.Session, url: String?) {
-            fragment.chromeViewModel.onFocusedUrlChanged(url)
+        override fun onTrackerBlocked(session: Session, blocked: String, all: List<String>) {
+            BrowsingSession.getInstance().setBlockedTrackerCount(all.size)
+        }
+
+        override fun onUrlChanged(session: Session, url: String) {
+            chromeViewModel.onFocusedUrlChanged(url)
             if (!UrlUtils.isInternalErrorURL(url)) {
-                fragment.displayUrlView.text = url
-            }
-        }
-
-        override fun onLoadingStateChanged(session: org.mozilla.rocket.tabs.Session, loading: Boolean) {
-            if (loading) {
-                fragment.chromeViewModel.onPageLoadingStarted()
-            } else {
-                fragment.chromeViewModel.onPageLoadingStopped()
-            }
-        }
-
-        override fun onSecurityChanged(session: org.mozilla.rocket.tabs.Session, isSecure: Boolean) {
-            val level = if (isSecure) SITE_LOCK else SITE_GLOBE
-            fragment.siteIdentity.setImageLevel(level)
-        }
-
-        override fun onSessionCountChanged(count: Int) {
-            fragment.chromeViewModel.onTabCountChanged(count)
-            if (count == 0) {
-                session?.unregister(this)
-            } else {
-                // TODO: Evan, uncomment this
-//                session = fragment.sessionManager.focusSession
-                session?.register(this)
-            }
-        }
-
-        override fun onDownload(
-            session: org.mozilla.rocket.tabs.Session,
-            download: mozilla.components.browser.session.Download
-        ): Boolean {
-            val activity = fragment.activity
-            if (activity == null || !activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
-                return false
-            }
-
-            val d = Download(
-                    download.url,
-                    download.fileName,
-                    download.userAgent,
-                    "",
-                    download.contentType,
-                    download.contentLength!!,
-                    false
-                    )
-            fragment.permissionHandler.tryAction(
-                    fragment,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                    ACTION_DOWNLOAD,
-                    d
-                    )
-            return true
-        }
-
-        override fun onHttpAuthRequest(
-            callback: TabViewClient.HttpAuthCallback,
-            host: String?,
-            realm: String?
-        ) {
-            val builder = HttpAuthenticationDialogBuilder.Builder(fragment.activity, host, realm)
-                    .setOkListener { _, _, username, password -> callback.proceed(username, password) }
-                    .setCancelListener { callback.cancel() }
-                    .build()
-
-            builder.createDialog()
-            builder.show()
-        }
-
-        override fun onNavigationStateChanged(session: org.mozilla.rocket.tabs.Session, canGoBack: Boolean, canGoForward: Boolean) {
-            fragment.chromeViewModel.onNavigationStateChanged(canGoBack, canGoForward)
-        }
-
-        override fun onFocusChanged(session: org.mozilla.rocket.tabs.Session?, factor: org.mozilla.rocket.tabs.SessionManager.Factor) {
-            fragment.chromeViewModel.onFocusedUrlChanged(session?.url)
-            fragment.chromeViewModel.onFocusedTitleChanged(session?.title)
-            if (session != null) {
-                // TODO: Evan, uncomment this
-//                val canGoBack = fragment.sessionManager.focusSession?.canGoBack ?: false
-//                val canGoForward = fragment.sessionManager.focusSession?.canGoForward ?: false
-//                fragment.chromeViewModel.onNavigationStateChanged(canGoBack, canGoForward)
+                displayUrlView.text = url
             }
         }
     }
 
-    class PrivateDownloadCallback(val fragment: BrowserFragment, val refererUrl: String?) : DownloadCallback {
+    class PrivateDownloadCallback(val fragment: BrowserFragment) : DownloadCallback {
         override fun onDownloadStart(download: Download) {
             fragment.activity?.let {
                 if (!it.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
@@ -621,11 +556,32 @@ class BrowserFragment : LocaleAwareFragment(),
             }
 
             fragment.permissionHandler.tryAction(
-                    fragment,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                    ACTION_DOWNLOAD,
-                    download
-                    )
+                fragment,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                ACTION_DOWNLOAD,
+                download
+            )
         }
     }
+}
+
+private fun HitResult.toHitTarget(): PrivateWebContextMenu.HitTarget {
+    val isLink: Boolean
+    val linkURL: String
+    var isImage = false
+    var imageURL: String? = null
+    when (this) {
+        is HitResult.IMAGE_SRC -> {
+            isLink = true
+            linkURL = uri
+            isImage = true
+            imageURL = src
+        }
+        else -> {
+            isLink = true
+            linkURL = src
+        }
+    }
+
+    return PrivateWebContextMenu.HitTarget(isLink, linkURL, isImage, imageURL)
 }
