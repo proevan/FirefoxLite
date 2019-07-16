@@ -16,10 +16,11 @@ import java.util.List;
 import mozilla.components.browser.session.Download;
 import mozilla.components.browser.session.Session;
 import mozilla.components.browser.session.SessionManager;
-import mozilla.components.browser.session.manifest.WebAppManifest;
 import mozilla.components.browser.session.tab.CustomTabConfig;
 import mozilla.components.concept.engine.HitResult;
+import mozilla.components.concept.engine.manifest.WebAppManifest;
 import mozilla.components.concept.engine.media.Media;
+import mozilla.components.concept.engine.media.RecordingDevice;
 import mozilla.components.concept.engine.permission.PermissionRequest;
 import mozilla.components.concept.engine.prompt.PromptRequest;
 import mozilla.components.concept.engine.window.WindowRequest;
@@ -97,6 +98,16 @@ public class PrivateSessionLoadedIdlingResource implements IdlingResource {
     };
 
     private Session.Observer sessionObserver = new Session.Observer() {
+        @Override
+        public void onRecordingDevicesChanged(@NotNull Session session, @NotNull List<RecordingDevice> list) {
+
+        }
+
+        @Override
+        public void onLoadRequest(@NotNull Session session, @NotNull String s, boolean b, boolean b1) {
+
+        }
+
         @Override
         public void onWebAppManifestChanged(@NotNull Session session, @Nullable WebAppManifest webAppManifest) {
 
