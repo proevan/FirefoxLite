@@ -40,7 +40,7 @@
 
         <activity android:name="org.mozilla.rocket.component.RocketLauncherActivity" />
 
-        <activity android:name="org.mozilla.rocket.TestActivity" />
+        <activity android:name="org.mozilla.rocket.test.TestActivity" />
 
         <activity-alias
             android:name="org.mozilla.rocket.activity.MainActivity"

@@ -59,7 +59,7 @@ import org.mozilla.focus.utils.ShortcutUtils
 import org.mozilla.focus.utils.SupportUtils
 import org.mozilla.focus.web.GeoPermissionCache
 import org.mozilla.focus.web.WebViewProvider
-import org.mozilla.rocket.TestActivity
+import org.mozilla.rocket.test.TestActivity
 import org.mozilla.rocket.appupdate.InAppUpdateController
 import org.mozilla.rocket.appupdate.InAppUpdateIntro
 import org.mozilla.rocket.chrome.ChromeViewModel
